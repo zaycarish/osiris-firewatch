@@ -1,0 +1,17 @@
+{
+  "jobs": [
+    {
+      "name": "example-local-service",
+      "check": [
+        "python3",
+        "-c",
+        "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080', timeout=5)"
+      ],
+      "timeout": 10,
+      "interval": 5,
+      "max_attempts": 3,
+      "attempt_window": 3600,
+      "cooldown": 900
+    }
+  ]
+}

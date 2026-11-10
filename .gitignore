@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+# Credentials and private configuration
+osiris/discord.json
+osiris/jobs.json
+.env
+.env.*
+!.env.example
+
+# Runtime state
+osiris/.run.lock
+osiris/.attempt-history.json
+osiris/.boot-notified.json
+osiris/.discord-pending.json
+osiris/.recovery.json
+osiris/.simulate-failure
+osiris/status.json
+osiris/alerts.jsonl
+
+# Logs
+*.log
+*.log.*
