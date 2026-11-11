@@ -20,6 +20,7 @@ Osiris Firewatch monitors services, detects failures, and performs controlled re
 - Discord failure and boot notifications
 - Local status and alert history
 - Failure simulation and recovery testing
+- Optional read-only VPN monitoring
 
 ## Specifications
 
@@ -104,7 +105,86 @@ Webhook credentials are stored locally in
 osiris/discord.json and excluded from Git.
 
 Never publish webhook URLs or private configuration.
+## Optional VPN Monitoring
 
+Firewatch includes an optional, read-only VPN monitoring subsystem. It reports failures through the normal Firewatch alert pipeline but does not reconnect, restart, or reconfigure a VPN.
+
+| Provider | Connection | Interface | Routes | Firewall |
+| --- | --- | --- | --- | --- |
+| Windscribe | Yes | Yes | Yes | Yes |
+| WireGuard | Handshake | Yes | Yes | No |
+| OpenVPN | systemd unit | Yes | Yes | No |
+| Generic | No | Yes | Yes | No |
+
+The generic adapter provides baseline interface and route monitoring for NordVPN, Psiphon, and other VPNs. Provider-specific connection or firewall monitoring requires a dedicated adapter.
+
+Create a local configuration:
+
+```bash
+cp osiris/vpn.example.json osiris/vpn.json
+```
+
+Test it manually:
+
+```bash
+python3 -m osiris.vpn --config osiris/vpn.json
+```
+
+To schedule it through Firewatch, add an alert-only job to the `jobs` array in `osiris/jobs.json`:
+
+```json
+{
+  "name": "vpn",
+  "check": [
+    "python3",
+    "-m",
+    "osiris.vpn",
+    "--config",
+    "osiris/vpn.json"
+  ],
+  "timeout": 30
+}
+```
+
+Do not add an `action` unless you intentionally develop and test a separate recovery policy. Automatic VPN recovery is not supplied or enabled.
+
+### Generic VPN example
+
+```json
+{
+  "provider": "generic",
+  "interface": "vpn0",
+  "route_targets": ["1.1.1.1"],
+  "checks": {
+    "connection": false,
+    "interface": true,
+    "routes": true,
+    "firewall": false
+  }
+}
+```
+
+Replace `vpn0` with the VPN’s tunnel interface.
+
+### Provider options
+
+For WireGuard, set `provider` to `wireguard` and the interface to `wg0`. The optional `provider_options.max_handshake_age` setting can mark old peer handshakes unhealthy.
+
+For OpenVPN, configure its systemd client unit:
+
+```json
+"provider_options": {
+  "service_unit": "openvpn-client@example.service"
+}
+```
+
+Windscribe may require its user runtime directory when Firewatch runs through systemd:
+
+```ini
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+```
+
+Use the correct numeric user ID for your system.
 ## Testing
 
 Run the automated test suite:

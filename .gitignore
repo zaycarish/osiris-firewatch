@@ -8,6 +8,7 @@ venv/
 # Credentials and private configuration
 osiris/discord.json
 osiris/jobs.json
+osiris/vpn.json
 .env
 .env.*
 !.env.example

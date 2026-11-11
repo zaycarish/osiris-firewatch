@@ -1,0 +1,16 @@
+{
+  "provider": "windscribe",
+  "interface": "tun0",
+  "route_targets": [
+    "1.1.1.1"
+  ],
+  "checks": {
+    "connection": true,
+    "interface": true,
+    "routes": true,
+    "firewall": true
+  },
+  "provider_options": {
+    "cli_path": "/usr/bin/windscribe-cli"
+  }
+}
