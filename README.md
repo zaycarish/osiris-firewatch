@@ -205,7 +205,8 @@ Osiris Firewatch executes trusted commands.
 
 ## Project Status
 
-Osiris Firewatch v0.1.0-alpha is experimental.
+Osiris Firewatch is purely experimental.
+I am not a professional software developer.
 
 The software has been tested in a personal Linux
 homelab & virtual machines but has not undergone an independent
