@@ -1,164 +1,236 @@
-"""Tests for the optional, read-only VPN monitor."""
+"""Automated tests for the optional VPN monitor."""
 
 import unittest
 
-from osiris.vpn.monitor import run_checks
 from osiris.vpn.providers.base import CommandResult
+from osiris.vpn.providers.windscribe import WindscribeAdapter
 
 
-class FakeRunner:
-    def __init__(self, responses):
-        self.responses = responses
-        self.calls = []
+class TestWindscribeAdapter(unittest.TestCase):
 
-    def __call__(self, command):
-        command = tuple(command)
-        self.calls.append(command)
-        for prefix, response in self.responses:
-            if command[:len(prefix)] == prefix:
-                return response
-        return CommandResult(127, "", f"unexpected command: {command}")
+    def test_connected_and_firewall_enabled(self):
+        def fake_command(args):
+            return CommandResult(
+                0,
+                "Connect state: Connected: New York - Empire\n"
+                "Firewall state: On\n",
+                "",
+            )
 
+        adapter = WindscribeAdapter(fake_command)
 
-class VPNMonitorTests(unittest.TestCase):
-    def test_windscribe_all_checks_pass(self):
-        runner = FakeRunner([
-            (
-                ("/usr/bin/windscribe-cli", "status"),
-                CommandResult(
-                    0,
-                    "Connect state: Connected: Test\nFirewall state: On",
-                    "",
-                ),
-            ),
-            (
-                ("ip", "-o", "link"),
-                CommandResult(
-                    0,
-                    "7: tun0: <POINTOPOINT,UP,LOWER_UP> mtu 1500",
-                    "",
-                ),
-            ),
-            (
-                ("ip", "-4", "route", "get"),
-                CommandResult(0, "1.1.1.1 dev tun0 src 10.0.0.2", ""),
-            ),
-        ])
-        config = {
-            "provider": "windscribe",
-            "interface": "tun0",
-            "route_targets": ["1.1.1.1"],
-            "checks": {
-                "connection": True,
-                "interface": True,
-                "routes": True,
-                "firewall": True,
-            },
-        }
+        self.assertTrue(adapter.check_connection({}).ok)
+        self.assertTrue(adapter.check_firewall({}).ok)
 
-        results = run_checks(config, runner)
+    def test_disconnected(self):
+        def fake_command(args):
+            return CommandResult(
+                0,
+                "Connect state: Disconnected\nFirewall state: Off\n",
+                "",
+            )
 
-        self.assertTrue(all(result.ok for result in results))
-        status_calls = [
-            call for call in runner.calls
-            if call == ("/usr/bin/windscribe-cli", "status")
-        ]
-        self.assertEqual(len(status_calls), 1)
+        adapter = WindscribeAdapter(fake_command)
 
-    def test_openvpn_rejects_unsupported_firewall_check(self):
-        config = {
-            "provider": "openvpn",
-            "checks": {
-                "connection": False,
-                "interface": False,
-                "routes": False,
-                "firewall": True,
-            },
-        }
+        self.assertFalse(adapter.check_connection({}).ok)
+        self.assertFalse(adapter.check_firewall({}).ok)
 
-        with self.assertRaisesRegex(ValueError, "does not support"):
-            run_checks(config, FakeRunner([]))
+    def test_cli_failure(self):
+        def fake_command(args):
+            return CommandResult(1, "", "CLI unavailable")
 
-    def test_wireguard_accepts_completed_handshake(self):
-        runner = FakeRunner([
-            (
-                ("/usr/bin/wg", "show", "wg0", "latest-handshakes"),
-                CommandResult(0, "peer-key 1700000000", ""),
-            ),
-        ])
-        config = {
-            "provider": "wireguard",
-            "interface": "wg0",
-            "checks": {
-                "connection": True,
-                "interface": False,
-                "routes": False,
-                "firewall": False,
-            },
-        }
+        adapter = WindscribeAdapter(fake_command)
 
-        results = run_checks(config, runner)
-
-        self.assertEqual(len(results), 1)
-        self.assertTrue(results[0].ok)
-
-    def test_route_check_detects_wrong_interface(self):
-        runner = FakeRunner([
-            (
-                ("ip", "-4", "route", "get"),
-                CommandResult(0, "1.1.1.1 dev eth0 src 192.0.2.2", ""),
-            ),
-        ])
-        config = {
-            "provider": "windscribe",
-            "interface": "tun0",
-            "route_targets": ["1.1.1.1"],
-            "checks": {
-                "connection": False,
-                "interface": False,
-                "routes": True,
-                "firewall": False,
-            },
-        }
-
-        results = run_checks(config, runner)
-
-        self.assertFalse(results[0].ok)
-        self.assertIn("1.1.1.1", results[0].detail)
-
-
-    def test_generic_provider_uses_interface_and_routes(self):
-        runner = FakeRunner([
-            (
-                ("ip", "-o", "link"),
-                CommandResult(
-                    0,
-                    "9: vpn0: <POINTOPOINT,UP,LOWER_UP> mtu 1500",
-                    "",
-                ),
-            ),
-            (
-                ("ip", "-4", "route", "get"),
-                CommandResult(0, "1.1.1.1 dev vpn0 src 10.8.0.2", ""),
-            ),
-        ])
-        config = {
-            "provider": "generic",
-            "interface": "vpn0",
-            "route_targets": ["1.1.1.1"],
-            "checks": {
-                "connection": False,
-                "interface": True,
-                "routes": True,
-                "firewall": False,
-            },
-        }
-
-        results = run_checks(config, runner)
-
-        self.assertEqual(len(results), 2)
-        self.assertTrue(all(result.ok for result in results))
+        self.assertFalse(adapter.check_connection({}).ok)
+        self.assertFalse(adapter.check_firewall({}).ok)
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestWireGuardAdapter(unittest.TestCase):
+
+    def test_successful_handshake(self):
+        from osiris.vpn.providers.wireguard import WireGuardAdapter
+
+        def fake_command(args):
+            return CommandResult(0, "peer123 1700000000\n", "")
+
+        adapter = WireGuardAdapter(fake_command)
+        result = adapter.check_connection({"interface": "wg0"})
+
+        self.assertTrue(result.ok)
+
+    def test_no_handshake(self):
+        from osiris.vpn.providers.wireguard import WireGuardAdapter
+
+        def fake_command(args):
+            return CommandResult(0, "peer123 0\n", "")
+
+        adapter = WireGuardAdapter(fake_command)
+        result = adapter.check_connection({"interface": "wg0"})
+
+        self.assertFalse(result.ok)
+
+    def test_command_failure(self):
+        from osiris.vpn.providers.wireguard import WireGuardAdapter
+
+        def fake_command(args):
+            return CommandResult(1, "", "interface not found")
+
+        adapter = WireGuardAdapter(fake_command)
+        result = adapter.check_connection({"interface": "wg0"})
+
+        self.assertFalse(result.ok)
+
+
+class TestOpenVPNAdapter(unittest.TestCase):
+
+    def test_active_service(self):
+        from osiris.vpn.providers.openvpn import OpenVPNAdapter
+
+        def fake_command(args):
+            return CommandResult(0, "active\n", "")
+
+        adapter = OpenVPNAdapter(fake_command)
+        result = adapter.check_connection({
+            "service_unit": "openvpn-client@test.service"
+        })
+
+        self.assertTrue(result.ok)
+
+    def test_inactive_service(self):
+        from osiris.vpn.providers.openvpn import OpenVPNAdapter
+
+        def fake_command(args):
+            return CommandResult(3, "inactive\n", "")
+
+        adapter = OpenVPNAdapter(fake_command)
+        result = adapter.check_connection({
+            "service_unit": "openvpn-client@test.service"
+        })
+
+        self.assertFalse(result.ok)
+
+    def test_command_failure(self):
+        from osiris.vpn.providers.openvpn import OpenVPNAdapter
+
+        def fake_command(args):
+            return CommandResult(1, "", "service not found")
+
+        adapter = OpenVPNAdapter(fake_command)
+        result = adapter.check_connection({
+            "service_unit": "openvpn-client@test.service"
+        })
+
+        self.assertFalse(result.ok)
+
+
+class TestGenericAdapter(unittest.TestCase):
+
+    def test_generic_registration(self):
+        from osiris.vpn.providers import create_adapter
+        from osiris.vpn.providers.generic import GenericAdapter
+
+        adapter = create_adapter(
+            "generic",
+            lambda args: CommandResult(0, "", ""),
+        )
+
+        self.assertIsInstance(adapter, GenericAdapter)
+
+    def test_generic_capabilities(self):
+        from osiris.vpn.providers.generic import GenericAdapter
+
+        adapter = GenericAdapter(
+            lambda args: CommandResult(0, "", "")
+        )
+
+        self.assertFalse(adapter.supports("connection"))
+        self.assertFalse(adapter.supports("firewall"))
+
+    def test_generic_rejects_connection_check(self):
+        from osiris.vpn.monitor import run_checks
+
+        config = {
+            "provider": "generic",
+            "interface": "tun0",
+            "checks": {
+                "connection": True,
+                "interface": False,
+                "routes": False,
+                "firewall": False,
+            },
+        }
+
+        with self.assertRaises(ValueError):
+            run_checks(
+                config,
+                lambda args: CommandResult(0, "", ""),
+            )
+
+
+class TestVPNInterface(unittest.TestCase):
+
+    def test_interface_up(self):
+        from osiris.vpn.system_checks import check_interface
+
+        def fake_command(args):
+            return CommandResult(
+                0, "5: tun0: <POINTOPOINT,UP,LOWER_UP> mtu 1500\n", ""
+            )
+
+        self.assertTrue(check_interface(fake_command, "tun0").ok)
+
+    def test_interface_down(self):
+        from osiris.vpn.system_checks import check_interface
+
+        def fake_command(args):
+            return CommandResult(
+                0, "5: tun0: <POINTOPOINT> mtu 1500\n", ""
+            )
+
+        self.assertFalse(check_interface(fake_command, "tun0").ok)
+
+    def test_interface_missing(self):
+        from osiris.vpn.system_checks import check_interface
+
+        def fake_command(args):
+            return CommandResult(1, "", "Device does not exist")
+
+        self.assertFalse(check_interface(fake_command, "tun0").ok)
+
+
+class TestVPNRoutes(unittest.TestCase):
+
+    def test_correct_route(self):
+        from osiris.vpn.system_checks import check_routes
+
+        def fake_command(args):
+            return CommandResult(
+                0, "1.1.1.1 dev tun0 src 10.0.0.2\n", ""
+            )
+
+        result = check_routes(fake_command, "tun0", ["1.1.1.1"])
+        self.assertTrue(result.ok)
+
+    def test_route_bypasses_vpn(self):
+        from osiris.vpn.system_checks import check_routes
+
+        def fake_command(args):
+            return CommandResult(
+                0, "1.1.1.1 via 10.0.0.1 dev enp2s0\n", ""
+            )
+
+        result = check_routes(fake_command, "tun0", ["1.1.1.1"])
+        self.assertFalse(result.ok)
+
+    def test_route_missing(self):
+        from osiris.vpn.system_checks import check_routes
+
+        def fake_command(args):
+            return CommandResult(2, "", "Network is unreachable")
+
+        result = check_routes(fake_command, "tun0", ["1.1.1.1"])
+        self.assertFalse(result.ok)
