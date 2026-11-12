@@ -4,7 +4,8 @@
 
 Osiris Firewatch monitors services, detects failures, and performs controlled recovery actions using configurable health checks.
 
-**Version:** v0.1.0-alpha
+**Version:** v0.2.0-alpha
+**OS** Ubuntu, Debian (have yet to test)
 **Status:** Experimental
 
 ## Features
